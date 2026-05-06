@@ -1,0 +1,13 @@
+{
+  "app_title": "الأسواق المالية",
+  "market_movers": "محركو السوق",
+  "most_active": "الأكثر نشاطاً",
+  "top_gainers": "الأكثر ارتفاعاً",
+  "top_losers": "الأكثر انخفاضاً",
+  "ticker": "الرمز",
+  "price": "السعر",
+  "change": "التغير %",
+  "volume": "الحجم",
+  "economic_news": "الأخبار الاقتصادية",
+  "switch_lang": "ترجمة"
+}
