@@ -1,5 +1,7 @@
 <script>
     import { locale, t } from '$lib/i18n/store.js';
+    import { onMount } from 'svelte';
+    import { goto } from '$app/navigation';
     
     /** @type {{ data: any }} */
     let { data } = $props();
@@ -17,6 +19,45 @@
     let stocks = $derived(data.stocks);
     let news = $derived(data.news);
     let showPopup = $state(false);
+    let isRefreshing = $state(false);
+
+    let formattedLastUpdate = $derived(
+        data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString($locale === 'ar' ? 'ar-SA' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : ''
+    );
+
+    const handleManualRefresh = async () => {
+        if (isRefreshing) return;
+        
+        const today = new Date().toLocaleDateString('en-US');
+        const storedDate = localStorage.getItem('refresh_date');
+        let refreshCount = parseInt(localStorage.getItem('refresh_count') || '0');
+
+        if (storedDate !== today) {
+            refreshCount = 0;
+            localStorage.setItem('refresh_date', today);
+        }
+
+        if (refreshCount >= 20) {
+            openPopup('تنبيه', 'لقد وصلت للحد الأقصى لتحديث البيانات يدوياً (20 مرة) لهذا اليوم. سيتم التحديث تلقائياً.');
+            return;
+        }
+
+        isRefreshing = true;
+        refreshCount++;
+        localStorage.setItem('refresh_count', refreshCount.toString());
+        
+        await goto('?refresh=true', { invalidateAll: true, replaceState: true });
+        isRefreshing = false;
+    };
+
+    onMount(() => {
+        // تحديث تلقائي كل ساعتين
+        const autoRefreshInterval = setInterval(() => {
+            goto('?refresh=true', { invalidateAll: true, replaceState: true });
+        }, 2 * 60 * 60 * 1000);
+
+        return () => clearInterval(autoRefreshInterval);
+    });
 
 /**
      * @param {Event} event
@@ -54,7 +95,7 @@
     let activeMainTab = $state('stocks');
     let activeStockTab = $state('active');
     let activeNewsTab = $state('investing');
-    let isDarkMode = $state(true);
+    let isDarkMode = $state(false);
     /** @type {any[]} */
     let translatedNews = $state([]);
     let isTranslating = $state(false);
@@ -126,7 +167,25 @@
 <div class="p-4 max-w-lg mx-auto pb-40 pt-24 transition-colors duration-500">
     <header class="fixed top-0 left-0 right-0 z-50 max-w-lg mx-auto p-4 border-b transition-all duration-700 shadow-sm {headerClass}">
         <div class="flex justify-between items-center">
-            <h1 class="text-xl font-extrabold tracking-wide">{$t('app_title')}</h1>
+            <div>
+                <h1 class="text-xl font-extrabold tracking-wide mb-1">{$t('app_title')}</h1>
+                {#if formattedLastUpdate}
+                    <div class="text-[10px] font-bold flex items-center gap-1.5 {isDarkMode ? 'text-slate-400' : 'text-slate-600'}">
+                        <span>آخر تحديث: <span dir="ltr">{formattedLastUpdate}</span></span>
+                        <button 
+                            onclick={handleManualRefresh}
+                            disabled={isRefreshing}
+                            aria-label="تحديث البيانات"
+                            class="p-1 rounded-full bg-indigo-500/10 text-indigo-500 active:scale-90 transition-all duration-200 disabled:opacity-50"
+                        >
+                            <svg class="w-3.5 h-3.5 {isRefreshing ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                            </svg>
+                        </button>
+                    </div>
+                {/if}
+            </div>
             <div class="flex items-center gap-3">
                 <button 
                     onclick={toggleTheme}

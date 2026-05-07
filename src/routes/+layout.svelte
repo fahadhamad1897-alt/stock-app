@@ -21,10 +21,10 @@
 <style>
     :global(body) {
         font-family: 'IBM Plex Sans Arabic', sans-serif;
-        background-color: #020617;
+        background-color: #1e3a8a;
         margin: 0;
         padding: 0;
-        color: #e2e8f0;
+        color: #ffffff;
         transition: background-color 0.8s ease;
         overflow-y: scroll;
     }

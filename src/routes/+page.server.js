@@ -11,13 +11,14 @@ const parser = new Parser({
 /** @type {any} */
 let cachedData = null;
 let lastFetchTime = 0;
-const EIGHT_HOURS = 8 * 60 * 60 * 1000;
+const TWO_HOURS = 2 * 60 * 60 * 1000;
 
-export async function load() {
-    const currentTime = Date.now();
+    export async function load({ url }) {
+        const currentTime = Date.now();
+        const forceRefresh = url.searchParams.get('refresh') === 'true';
 
-    // 1. التحقق من التخزين المؤقت
-    if (cachedData && cachedData.stocks && cachedData.stocks.active.length > 0 && (currentTime - lastFetchTime < EIGHT_HOURS)) {
+        // 1. التحقق من التخزين المؤقت
+        if (!forceRefresh && cachedData && cachedData.stocks && cachedData.stocks.active.length > 0 && (currentTime - lastFetchTime < TWO_HOURS)) {
         return { 
             stocks: cachedData.stocks, 
             news: cachedData.news,
@@ -101,11 +102,13 @@ export async function load() {
 
         // جلب من Yahoo Finance
         try {
-            const yahooFeed = await parser.parseURL('https://finance.yahoo.com/news/rss');
+            // تم استخدام Google News كوسيط مستقر لجلب أخبار Yahoo Finance لتخطي الحظر
+            const yahooFeed = await parser.parseURL('https://news.google.com/rss/search?q=site:finance.yahoo.com&hl=en-US&gl=US&ceid=US:en');
             yahooNews = yahooFeed.items
                 .filter((/** @type {any} */ item) => item.pubDate && new Date(item.pubDate).getTime() >= twentyFourHoursAgo)
                 .map((/** @type {any} */ item) => ({
-                    title: item.title,
+                    // تنظيف العنوان من اسم المصدر الذي يضيفه جوجل تلقائياً
+                    title: item.title ? item.title.replace(/ - Yahoo Finance.*/, '').replace(/ - Yahoo.*/, '') : '',
                     link: item.link,
                     pubDate: item.pubDate || new Date().toISOString(),
                     source: 'Yahoo Finance'
