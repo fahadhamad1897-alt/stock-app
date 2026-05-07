@@ -115,8 +115,8 @@
         : 'bg-white/50 border-white/30 backdrop-blur-2xl shadow-2xl');
 
     let subBtnClass = $derived(isDarkMode
-        ? 'bg-slate-800/40 border-slate-700/50 backdrop-blur-md text-slate-200'
-        : 'bg-white/40 border-white/40 backdrop-blur-md text-slate-800');
+        ? 'bg-slate-800/70 border-slate-700/60 backdrop-blur-2xl text-slate-200'
+        : 'bg-white/70 border-white/60 backdrop-blur-2xl text-slate-800');
     let popupBgClass = $derived(isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-slate-300');
 
     let greenText = $derived(isDarkMode ? 'text-emerald-400' : 'text-emerald-600');
@@ -140,9 +140,11 @@
                     <div class="w-6 h-6 rounded-full bg-white shadow-lg z-10 transform transition-transform duration-500 {isDarkMode ? 'translate-x-8' : 'translate-x-0'}"></div>
                 </button>
                 
+                {#if activeMainTab === 'news'}
                 <button onclick={toggleLanguage} aria-label="ترجمة الأخبار" class="px-4 py-1.5 bg-indigo-600 text-white rounded-full text-xs font-bold shadow-md active:scale-90 transition-transform duration-200">
                     {$t('switch_lang')}
                 </button>
+                {/if}
             </div>
         </div>
     </header>
@@ -238,7 +240,7 @@
                             <h3 class="text-sm font-bold leading-relaxed mb-3">{item.title}</h3>
                             <div class="text-[11px] flex justify-between items-center font-medium mt-2 {subTextClass}">
                                 <span class="bg-indigo-500/10 px-2 py-1 rounded-md text-indigo-500">{item.source}</span>
-                                <span dir="ltr">{new Date(item.pubDate).toLocaleString($locale, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                <span dir="ltr">{new Date(item.pubDate).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                         </a>
                     {/each}
@@ -268,7 +270,7 @@
                             <div class="rounded-2xl p-4 mb-5 border shadow-inner {isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}">
                                 <div class="flex justify-between items-center mb-3 border-b pb-3 {isDarkMode ? 'border-slate-700' : 'border-slate-200'}">
                                     <span class="text-sm font-bold {isDarkMode ? 'text-slate-400' : 'text-slate-600'}">السعر الحالي</span>
-                                    <span class="text-xl font-black" dir="ltr">${popupStock.price}</span>
+                                    <span class="text-xl font-black {isDarkMode ? 'text-slate-100' : 'text-slate-900'}" dir="ltr">${popupStock.price}</span>
                                 </div>
                                 <div class="flex justify-between items-center mb-3 border-b pb-3 {isDarkMode ? 'border-slate-700' : 'border-slate-200'}">
                                     <span class="text-sm font-bold {isDarkMode ? 'text-slate-400' : 'text-slate-600'}">نسبة التغير</span>
@@ -278,7 +280,7 @@
                                 </div>
                                 <div class="flex justify-between items-center">
                                     <span class="text-sm font-bold {isDarkMode ? 'text-slate-400' : 'text-slate-600'}">حجم التداول</span>
-                                    <span class="text-lg font-black" dir="ltr">{popupStock.volume || 'غير متوفر'}</span>
+                                    <span class="text-lg font-black {isDarkMode ? 'text-slate-100' : 'text-slate-900'}" dir="ltr">{popupStock.volume || 'غير متوفر'}</span>
                                 </div>
                             </div>
 
@@ -308,7 +310,7 @@
 
 <div class="fixed bottom-0 left-0 right-0 w-full z-40 transition-colors duration-500">
     <!-- خلفية التغبيش التدريجي خلف الأزرار العليا -->
-    <div class="absolute inset-x-0 bottom-full h-32 pointer-events-none backdrop-blur-sm [mask-image:linear-gradient(to_top,black,transparent)]"></div>
+    <div class="absolute inset-x-0 bottom-full h-32 pointer-events-none backdrop-blur-lg [mask-image:linear-gradient(to_top,black,transparent)]"></div>
 
     <div class="max-w-lg mx-auto w-full relative border-t {navClass}">
         <!-- أزرار التبويبات الفرعية الطائرة بتنسيق BLUR -->

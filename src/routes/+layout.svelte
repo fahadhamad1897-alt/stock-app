@@ -26,5 +26,6 @@
         padding: 0;
         color: #e2e8f0;
         transition: background-color 0.8s ease;
+        overflow-y: scroll;
     }
 </style>
