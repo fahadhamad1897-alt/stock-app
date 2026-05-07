@@ -72,6 +72,7 @@
     let popupTitle = $state('');
     let popupContent = $state('');
     let popupStock = $derived(
+        (stocks && stocks.trending && stocks.trending.find((/** @type {any} */ s) => s.ticker === popupTitle)) ||
         (stocks && stocks.active && stocks.active.find((/** @type {any} */ s) => s.ticker === popupTitle)) ||
         (stocks && stocks.gainers && stocks.gainers.find((/** @type {any} */ s) => s.ticker === popupTitle)) ||
         (stocks && stocks.losers && stocks.losers.find((/** @type {any} */ s) => s.ticker === popupTitle)) ||
@@ -212,7 +213,32 @@
         <div class="space-y-3 fade-content">
             {#if activeMainTab === 'stocks'}
                 
-                {#if activeStockTab === 'active'}
+                {#if activeStockTab === 'trending'}
+                    {#if stocks && stocks.trending && stocks.trending.length > 0}
+                        {#each stocks.trending as stock}
+                            <button onclick={() => openPopup(stock.ticker, stock.name)} class="w-full text-start p-4 rounded-2xl border flex justify-between items-center active:scale-[0.98] transition-all duration-300 {cardClass}">
+                                <div class="flex-1 overflow-hidden pr-2">
+                                    <div class="font-black text-sky-500 uppercase text-lg tracking-wider">{stock.ticker}</div>
+                                    <div class="text-xs mt-1 font-bold truncate w-full {subTextClass}">{stock.name}</div>
+                                </div>
+                                <div class="text-right shrink-0">
+                                    <div class="font-black text-lg">${stock.price}</div>
+                                    <div class="flex items-center justify-end gap-1.5 mt-1 text-xs font-bold" dir="ltr">
+                                        <span class={Number(stock.change) >= 0 ? greenText : redText}>
+                                            {Number(stock.change) >= 0 ? '+' : ''}{stock.changeAmount}
+                                        </span>
+                                        <span class={Number(stock.change) >= 0 ? greenText : redText}>
+                                            ({Number(stock.change) >= 0 ? '+' : ''}{stock.change}%)
+                                        </span>
+                                    </div>
+                                </div>
+                            </button>
+                        {/each}
+                    {:else}
+                        <div class="text-center py-6 rounded-2xl border text-sm font-bold {cardClass}">جاري جلب البيانات...</div>
+                    {/if}
+
+                {:else if activeStockTab === 'active'}
                     {#if stocks && stocks.active && stocks.active.length > 0}
                         {#each stocks.active as stock}
                             <button onclick={() => openPopup(stock.ticker, stock.name)} class="w-full text-start p-4 rounded-2xl border flex justify-between items-center active:scale-[0.98] transition-all duration-300 {cardClass}">
@@ -373,11 +399,17 @@
 
     <div class="max-w-lg mx-auto w-full relative border-t {navClass}">
         <!-- أزرار التبويبات الفرعية الطائرة بتنسيق BLUR -->
-        <div class="absolute -top-14 left-0 right-0 px-4 flex justify-center gap-3">
+        <div class="absolute -top-14 left-0 right-0 px-4 flex sm:justify-center overflow-x-auto gap-2 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {#if activeMainTab === 'stocks'}
                 <button 
+                    onclick={() => activeStockTab = 'trending'}
+                    class="shrink-0 px-4 py-2.5 rounded-full font-bold text-sm shadow-lg transition-all duration-300 border {activeStockTab === 'trending' ? 'bg-sky-500 text-white scale-105 border-sky-400' : subBtnClass}"
+                >
+                    {$t('trending')}
+                </button>
+                <button 
                     onclick={() => activeStockTab = 'active'}
-                    class="px-5 py-2.5 rounded-full font-bold text-sm shadow-lg transition-all duration-300 border {activeStockTab === 'active' ? 'bg-indigo-500 text-white scale-105 border-indigo-400' : subBtnClass}"
+                    class="shrink-0 px-4 py-2.5 rounded-full font-bold text-sm shadow-lg transition-all duration-300 border {activeStockTab === 'active' ? 'bg-indigo-500 text-white scale-105 border-indigo-400' : subBtnClass}"
                 >
                     {$t('most_active')}
                 </button>

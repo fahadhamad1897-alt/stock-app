@@ -1,158 +1,398 @@
-const ALPHA_VANTAGE_KEY = 'WPGSA9GYK3LL716Y';
 const FMP_KEY = 'VPcxV6OwUUvn1orNx6p4pQwiYI1unAY6';
+const ALPHA_VANTAGE_KEY = 'WPGSA9GYK3LL716Y';
 import Parser from 'rss-parser';
 
 const parser = new Parser({
     headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
 });
 
 /** @type {any} */
 let cachedData = null;
 let lastFetchTime = 0;
-const TWO_HOURS = 2 * 60 * 60 * 1000;
+const CACHE_DURATION = 15 * 60 * 1000; // ✅ 15 دقيقة فقط بدلاً من ساعتين
 
-    export async function load({ url }) {
-        const currentTime = Date.now();
-        const forceRefresh = url.searchParams.get('refresh') === 'true';
-
-        // 1. التحقق من التخزين المؤقت
-        if (!forceRefresh && cachedData && cachedData.stocks && cachedData.stocks.active.length > 0 && (currentTime - lastFetchTime < TWO_HOURS)) {
-        return { 
-            stocks: cachedData.stocks, 
-            news: cachedData.news,
-            lastUpdated: lastFetchTime 
+// ============================================================
+// أداة مساعدة: جلب بيانات سهم من Yahoo Finance
+// ============================================================
+/** @param {string} ticker */
+async function getYahooQuote(ticker) {
+    try {
+        const res = await fetch(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
+            { headers: { 'User-Agent': 'Mozilla/5.0' } }
+        );
+        const data = await res.json();
+        const meta = data?.chart?.result?.[0]?.meta;
+        if (!meta) return null;
+        return {
+            symbol: ticker,
+            price: meta.regularMarketPrice,
+            change: meta.regularMarketPrice - meta.previousClose,
+            changesPercentage: ((meta.regularMarketPrice - meta.previousClose) / meta.previousClose) * 100,
+            volume: meta.regularMarketVolume,
+            name: ticker
         };
+    } catch(e) { return null; }
+}
+
+// ============================================================
+// جلب Gainers/Losers/Active من Yahoo Finance Screener
+// ============================================================
+async function fetchMarketMovers() {
+    /** @param {string} scrUrl */
+    const fetchScreener = async (scrUrl) => {
+        try {
+            const res = await fetch(scrUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'application/json'
+                }
+            });
+            const data = await res.json();
+            const quotes = data?.finance?.result?.quotes || 
+                          data?.finance?.result?.[0]?.quotes || [];
+            return quotes;
+        } catch(e) { return []; }
+    };
+
+    const [gainersRaw, losersRaw, activeRaw] = await Promise.all([
+        fetchScreener('https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=25&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume'),
+        fetchScreener('https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_losers&count=25&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume'),
+        fetchScreener('https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=25&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume')
+    ]);
+
+    console.log('Yahoo gainers:', gainersRaw.length, '| losers:', losersRaw.length, '| active:', activeRaw.length);
+
+    /** @param {any[]} list */
+    const processYahoo = (list) => list
+        .filter(s => parseFloat(s.regularMarketPrice || 0) >= 2)
+        .slice(0, 20)
+        .map(s => ({
+            ticker: s.symbol,
+            name: s.shortName || s.longName || s.symbol,
+            price: parseFloat(s.regularMarketPrice || 0).toFixed(2),
+            changeAmount: parseFloat(s.regularMarketChange || 0).toFixed(2),
+            change: parseFloat(s.regularMarketChangePercent || 0).toFixed(2),
+            volume: formatVolume(parseInt(s.regularMarketVolume || 0))
+        }));
+
+    const gainers = processYahoo(gainersRaw);
+    const losers = processYahoo(losersRaw);
+    const active = processYahoo(activeRaw);
+
+    // إذا Yahoo نجح
+    if (gainers.length > 0) {
+        console.log('✅ Yahoo Screener يعمل');
+        return { gainers, losers, active };
     }
 
-    /** @type {{ active: any[], gainers: any[], losers: any[] }} */
-    let stocks = { active: [], gainers: [], losers: [] };
-    
-    /** @type {any[]} */
-    let news =[];
-
-    // 2. جلب البيانات من المصادر (Alpha Vantage للقوائم و FMP للأسماء)
+    // Fallback: Alpha Vantage
+    console.log('🔄 Yahoo فشل، التحويل لـ Alpha Vantage...');
     try {
-        console.log("جاري جلب البيانات الموحدة...");
-        const response = await fetch(`https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=${ALPHA_VANTAGE_KEY}`);
-        const data = await response.json();
-
+        const res = await fetch(`https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=${ALPHA_VANTAGE_KEY}`);
+        const data = await res.json();
         const activeRaw = data.most_actively_traded || [];
         const gainersRaw = data.top_gainers || [];
         const losersRaw = data.top_losers || [];
 
-        // جمع كل الرموز من القوائم الثلاث في قائمة واحدة بدون تكرار لجلب أسمائها بطلب واحد فقط
-        const allTickers = [...new Set([
-            ...activeRaw.map((/** @type {any} */ s) => s.ticker),
-            ...gainersRaw.map((/** @type {any} */ s) => s.ticker),
-            ...losersRaw.map((/** @type {any} */ s) => s.ticker)
-        ])].join(',');
+        /** @param {any[]} list */
+        const processAV = (list) => list
+            .filter(s => parseFloat(s.price || 0) >= 2 && parseInt(s.volume || 0) >= 500000)
+            .slice(0, 20)
+            .map(s => ({
+                ticker: s.ticker,
+                name: s.ticker,
+                price: parseFloat(s.price || 0).toFixed(2),
+                changeAmount: parseFloat(s.change_amount || 0).toFixed(2),
+                change: (s.change_percentage || '0').replace('%', ''),
+                volume: formatVolume(parseInt(s.volume || 0))
+            }));
 
-        /** @type {Record<string, string>} */
-        let nameMap = {};
+        return {
+            gainers: processAV(gainersRaw),
+            losers: processAV(losersRaw),
+            active: processAV(activeRaw)
+        };
+    } catch(e) {
+        console.log('❌ Alpha Vantage فشل أيضاً');
+    }
 
-        // طلب واحد فقط لـ FMP لجلب أسماء كل الشركات المذكورة أعلاه
-        if (allTickers && FMP_KEY) {
+    return { gainers: [], losers: [], active: [] };
+}
+
+// ============================================================
+// Trending من Yahoo Finance Trending Tickers
+// ============================================================
+async function fetchTrending() {
+    try {
+        const res = await fetch(
+            'https://query1.finance.yahoo.com/v1/finance/trending/US?count=25',
+            { headers: { 'User-Agent': 'Mozilla/5.0' } }
+        );
+        const data = await res.json();
+        const tickers = (data?.finance?.result?.[0]?.quotes || [])
+            .map((/** @type {any} */ q) => q.symbol)
+            .filter(Boolean)
+            .slice(0, 15)
+            .join(',');
+
+        console.log('Yahoo Trending tickers:', tickers);
+
+        if (!tickers) throw new Error('لا توجد رموز');
+
+        // جلب أسعارها من Yahoo مباشرة
+        const priceRes = await fetch(
+            `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${tickers}`,
+            { headers: { 'User-Agent': 'Mozilla/5.0' } }
+        );
+        const priceData = await priceRes.json();
+        const quotes = priceData?.quoteResponse?.result || [];
+
+        if (quotes.length > 0) {
+            console.log('✅ Yahoo Trending يعمل، عدد:', quotes.length);
+            return quotes.map((/** @type {any} */ s) => ({
+                ticker: s.symbol,
+                name: s.shortName || s.longName || s.symbol,
+                price: parseFloat(s.regularMarketPrice || 0).toFixed(2),
+                changeAmount: parseFloat(s.regularMarketChange || 0).toFixed(2),
+                change: parseFloat(s.regularMarketChangePercent || 0).toFixed(2),
+                volume: formatVolume(parseInt(s.regularMarketVolume || 0))
+            }));
+        }
+    } catch(e) {
+        console.log('❌ Yahoo Trending فشل:', e);
+    }
+
+    // Fallback ثابت
+    const fallback = 'AAPL,TSLA,NVDA,AMD,AMZN,META,GOOGL,MSFT,PLTR,COIN,NFLX,UBER,DIS,BABA,SOFI';
+    try {
+        const res = await fetch(
+            `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${fallback}`,
+            { headers: { 'User-Agent': 'Mozilla/5.0' } }
+        );
+        const data = await res.json();
+        const quotes = data?.quoteResponse?.result || [];
+        return quotes
+            .sort((/** @type {any} */ a, /** @type {any} */ b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0))
+            .map((/** @type {any} */ s) => ({
+                ticker: s.symbol,
+                name: s.shortName || s.longName || s.symbol,
+                price: parseFloat(s.regularMarketPrice || 0).toFixed(2),
+                changeAmount: parseFloat(s.regularMarketChange || 0).toFixed(2),
+                change: parseFloat(s.regularMarketChangePercent || 0).toFixed(2),
+                volume: formatVolume(parseInt(s.regularMarketVolume || 0))
+            }));
+    } catch(e) {
+        console.log('❌ Fallback فشل أيضاً');
+    }
+
+    return [];
+}
+
+// ============================================================
+// 📰 جلب الأخبار (نفس المنطق + مصدر إضافي)
+// ============================================================
+async function fetchNews() {
+    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+    /** @type {any[]} */
+    let allNews = [];
+
+    const sources = [
+        {
+            url: 'https://news.google.com/rss/search?q=site:finance.yahoo.com+stock+market&hl=en-US&gl=US&ceid=US:en',
+            source: 'Yahoo Finance',
+            clean: (/** @type {string} */ t) => t.replace(/ - Yahoo Finance.*/, '').replace(/ - Yahoo.*/, '')
+        },
+        {
+            url: 'https://www.investing.com/rss/news_25.rss',
+            source: 'Investing.com',
+            clean: (/** @type {string} */ t) => t
+        },
+        {
+            url: 'https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US',
+            source: 'Market News',
+            clean: (/** @type {string} */ t) => t
+        }
+    ];
+
+    await Promise.allSettled(sources.map(async ({ url, source, clean }) => {
+        try {
+            const feed = await parser.parseURL(url);
+            const items = feed.items
+                .filter(item => item.pubDate && new Date(item.pubDate).getTime() >= twentyFourHoursAgo)
+                .map(item => ({
+                    title: clean(item.title || ''),
+                    link: item.link,
+                    pubDate: item.pubDate || new Date().toISOString(),
+                    source
+                }));
+            allNews.push(...items);
+        } catch (e) {
+            console.log(`فشل جلب ${source}`);
+        }
+    }));
+
+    // إزالة المكررات وترتيب من الأحدث للأقدم
+    const seen = new Set();
+    return allNews
+        .filter(item => {
+            const key = item.title.slice(0, 40);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+}
+
+// ============================================================
+// 📊 دالة التقرير اليومي (تُرسَل عند 12 منتصف الليل)
+// ============================================================
+
+/**
+ * @typedef {Object} Stock
+ * @property {string} ticker
+ * @property {string} name
+ * @property {string} price
+ * @property {string|number} change
+ * @property {string} changeAmount
+ * @property {string} volume
+ */
+
+/**
+ * @typedef {Object} NewsItem
+ * @property {string} title
+ * @property {string} source
+ * @property {string} [link]
+ * @property {string} [pubDate]
+ */
+
+/**
+ * @param {{ active: Stock[], gainers: Stock[], losers: Stock[] }} stocks
+ * @param {NewsItem[]} news
+ */
+export async function generateDailyReport(stocks, news) {
+    const topActive = stocks.active.slice(0, 5);
+    const topGainers = stocks.gainers.slice(0, 5);
+    const topLosers = stocks.losers.slice(0, 5);
+    const topNews = news.slice(0, 10);
+
+    const date = new Date().toLocaleDateString('ar-SA', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    let report = `📊 **تقرير السوق اليومي - ${date}**\n\n`;
+
+    report += `🔥 **الأكثر نشاطاً:**\n`;
+    topActive.forEach((/** @type {Stock} */ s) => {
+        report += `• ${s.ticker} (${s.name}) | $${s.price} | ${Number(s.change) >= 0 ? '▲' : '▼'}${Math.abs(Number(s.change))}% | Vol: ${s.volume}\n`;
+    });
+
+    report += `\n📈 **الأكثر ارتفاعاً:**\n`;
+    topGainers.forEach((/** @type {Stock} */ s) => {
+        report += `• ${s.ticker} (${s.name}) | $${s.price} | ▲${s.change}% | Vol: ${s.volume}\n`;
+    });
+
+    report += `\n📉 **الأكثر انخفاضاً:**\n`;
+    topLosers.forEach((/** @type {Stock} */ s) => {
+        report += `• ${s.ticker} (${s.name}) | $${s.price} | ▼${Math.abs(Number(s.change))}% | Vol: ${s.volume}\n`;
+    });
+
+    report += `\n📰 **أهم الأخبار:**\n`;
+    topNews.forEach((/** @type {NewsItem} */ n, /** @type {number} */ i) => {
+        report += `${i + 1}. ${n.title} (${n.source})\n`;
+    });
+
+    return report;
+}
+
+// ============================================================
+// ⏰ جدولة التقرير اليومي (12 منتصف الليل بتوقيت السعودية = 9 PM ET)
+// ============================================================
+let reportScheduled = false;
+function scheduleDailyReport() {
+    if (reportScheduled) return;
+    reportScheduled = true;
+
+    const scheduleNext = () => {
+        const now = new Date();
+        // 12 منتصف الليل توقيت السعودية = UTC+3 = 21:00 UTC
+        const target = new Date();
+        target.setUTCHours(21, 0, 0, 0); // 12 مساء (منتصف الليل) بتوقيت السعودية
+        if (target <= now) target.setDate(target.getDate() + 1);
+
+        const msUntilTarget = target.getTime() - now.getTime();
+        console.log(`⏰ التقرير اليومي سيُرسَل بعد ${Math.round(msUntilTarget / 60000)} دقيقة`);
+
+        setTimeout(async () => {
             try {
-                const fmpRes = await fetch(`https://financialmodelingprep.com/api/v3/quote/${allTickers}?apikey=${FMP_KEY}`);
-                const fmpData = await fmpRes.json();
-                if (Array.isArray(fmpData)) {
-                    fmpData.forEach((/** @type {any} */ q) => {
-                        nameMap[q.symbol] = q.name || q.symbol;
-                    });
+                const { stocks, news } = cachedData || {};
+                if (stocks && news) {
+                    const report = await generateDailyReport(stocks, news);
+                    console.log('='.repeat(60));
+                    console.log('📧 التقرير اليومي جاهز للإرسال:');
+                    console.log(report);
+                    console.log('='.repeat(60));
+                    // هنا يمكنك إضافة إرسال عبر واتساب/إيميل/تيليجرام
                 }
             } catch (e) {
-                console.error("خطأ في جلب الأسماء من FMP");
+                console.error('فشل إنشاء التقرير اليومي:', e);
             }
-        }
+            scheduleNext(); // جدولة اليوم التالي
+        }, msUntilTarget);
+    };
 
-        // وظيفة داخلية لتوزيع البيانات والأسماء على القوائم
-        /** @param {any[]} list */
-        const processList = (list) => list.slice(0, 50).map(s => ({
-            ticker: s.ticker,
-            name: nameMap[s.ticker] || s.ticker,
-            price: parseFloat(s.price).toFixed(2),
-            changeAmount: parseFloat(s.change_amount || "0").toFixed(2),
-            change: s.change_percentage.replace('%', ''),
-            volume: formatVolume(parseInt(s.volume))
-        }));
+    scheduleNext();
+}
 
-        stocks.active = processList(activeRaw);
-        stocks.gainers = processList(gainersRaw);
-        stocks.losers = processList(losersRaw);
+// ============================================================
+// 🚀 الدالة الرئيسية
+// ============================================================
+export async function load({ url }) {
+    scheduleDailyReport();
 
-        console.log("تم تحديث كافة البيانات والأسماء بطلبات موحدة");
-    } catch (error) {
-        console.error("خطأ في جلب البيانات:", error);
-    }
-
-    // 3. جلب الأخبار من Yahoo و Investing معاً خلال 24 ساعة
+    // 🔍 اختبار مباشر — احذفه بعد التشخيص
     try {
-        console.log("جاري جلب الأخبار من عدة مصادر...");
-        
-        /** @type {any[]} */
-        let yahooNews = [];
-        
-        /** @type {any[]} */
-        let investingNews =[];
-
-        // حساب الوقت الحالي ناقص 24 ساعة (بالميلي ثانية)
-        const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
-
-        // جلب من Yahoo Finance
-        try {
-            // تم استخدام Google News كوسيط مستقر لجلب أخبار Yahoo Finance لتخطي الحظر
-            const yahooFeed = await parser.parseURL('https://news.google.com/rss/search?q=site:finance.yahoo.com&hl=en-US&gl=US&ceid=US:en');
-            yahooNews = yahooFeed.items
-                .filter((/** @type {any} */ item) => item.pubDate && new Date(item.pubDate).getTime() >= twentyFourHoursAgo)
-                .map((/** @type {any} */ item) => ({
-                    // تنظيف العنوان من اسم المصدر الذي يضيفه جوجل تلقائياً
-                    title: item.title ? item.title.replace(/ - Yahoo Finance.*/, '').replace(/ - Yahoo.*/, '') : '',
-                    link: item.link,
-                    pubDate: item.pubDate || new Date().toISOString(),
-                    source: 'Yahoo Finance'
-                }));
-        } catch (e) {
-            console.error("خطأ في جلب أخبار Yahoo");
-        }
-
-        // جلب من Investing
-        try {
-            const investingFeed = await parser.parseURL('https://www.investing.com/rss/news_25.rss');
-            investingNews = investingFeed.items
-                .filter((/** @type {any} */ item) => item.pubDate && new Date(item.pubDate).getTime() >= twentyFourHoursAgo)
-                .map((/** @type {any} */ item) => ({
-                    title: item.title,
-                    link: item.link,
-                    pubDate: item.pubDate || new Date().toISOString(),
-                    source: 'Investing.com'
-                }));
-        } catch (e) {
-            console.error("خطأ في جلب أخبار Investing");
-        }
-
-        // دمج الأخبار من المصدرين وترتيبها من الأحدث للأقدم
-        news =[...yahooNews, ...investingNews].sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
-        
-        console.log("تم جلب الأخبار بنجاح. العدد الإجمالي:", news.length);
-    } catch (error) {
-        console.error("فشل دمج الأخبار:", error);
+        const test = await fetch(`https://financialmodelingprep.com/api/v3/stock_market/gainers?apikey=${FMP_KEY}`);
+        const testData = await test.json();
+        console.log('FMP STATUS:', test.status);
+        console.log('FMP RESPONSE:', JSON.stringify(testData).slice(0, 300));
+    } catch(e) {
+        console.log('FMP ERROR:', e);
     }
 
-    if (news.length === 0) {
-        console.log("تفعيل أخبار الطوارئ...");
-        news =[
-            { title: 'الأسواق العالمية تترقب قرارات الفائدة القادمة', link: '#', pubDate: new Date().toISOString(), source: 'تحديثات السوق' },
-            { title: 'ارتفاع ملحوظ في قطاع التكنولوجيا بقيادة الذكاء الاصطناعي', link: '#', pubDate: new Date().toISOString(), source: 'أخبار اقتصادية' }
-        ];
+    const currentTime = Date.now();
+    const forceRefresh = url.searchParams.get('refresh') === 'true';
+
+    if (!forceRefresh && cachedData && (currentTime - lastFetchTime < CACHE_DURATION)) {
+        return {
+            stocks: cachedData.stocks,
+            news: cachedData.news,
+            lastUpdated: lastFetchTime
+        };
     }
 
-    // 5. تحديث التخزين
-    cachedData = { stocks, news };
+    console.log("🔄 جلب بيانات جديدة...");
+
+    // جلب كل شيء بالتوازي
+    const [movers, trending, news] = await Promise.allSettled([
+        fetchMarketMovers(),
+        fetchTrending(),
+        fetchNews()
+    ]);
+
+    const stocks = {
+        ...(movers.status === 'fulfilled' ? movers.value : { gainers: [], losers: [], active: [] }),
+        trending: trending.status === 'fulfilled' ? trending.value : []
+    };
+
+    const newsData = news.status === 'fulfilled' ? news.value : [];
+
+    cachedData = { stocks, news: newsData };
     lastFetchTime = currentTime;
 
-    return { stocks, news, lastUpdated: lastFetchTime };
+    return { stocks, news: newsData, lastUpdated: lastFetchTime };
 }
 
 /** @param {any} vol */
